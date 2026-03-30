@@ -2,14 +2,18 @@ package com.example.scoremaster.app.controller;
 
 import com.example.scoremaster.app.security.JwtUtil;
 import jakarta.servlet.http.Cookie;
+
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.web.bind.annotation.*;
+
+import java.security.Principal;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -25,8 +29,18 @@ public class AuthController {
         return "Auth Test";
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<AuthResponse> getCurrentUser(Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(401).build();
+        }
+        UserDetails userDetails = userDetailsService.loadUserByUsername(principal.getName());
+        String role = userDetails.getAuthorities().iterator().next().getAuthority();
+        return ResponseEntity.ok(new AuthResponse(userDetails.getUsername(), role));
+    }
+
     @PostMapping("/logout")
-    public org.springframework.http.ResponseEntity<Void> logout(HttpServletResponse response) {
+    public ResponseEntity<Void> logout(HttpServletResponse response) {
         // Create an empty cookie with the exact same name and path
         Cookie jwtCookie = new Cookie("jwt", null);
         jwtCookie.setHttpOnly(true);
