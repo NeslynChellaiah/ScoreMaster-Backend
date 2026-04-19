@@ -28,11 +28,9 @@ public class Event {
     private String description;
 
     @Column(nullable = false)
-    @NotBlank
     private LocalDate startDate;
 
     @Column(nullable = false)
-    @NotBlank
     private LocalDate endDate;
 
     @Column(nullable = false)
