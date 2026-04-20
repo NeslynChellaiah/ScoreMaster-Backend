@@ -18,10 +18,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 @AllArgsConstructor
 public class User {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private String id;
 
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String username;
 
     @JsonIgnore
@@ -31,7 +30,7 @@ public class User {
     @Enumerated(EnumType.STRING)
     private Role role;
 
-    private Long eventId;
+    private String eventId;
 
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();

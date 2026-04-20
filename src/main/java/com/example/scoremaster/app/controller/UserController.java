@@ -32,7 +32,7 @@ public class UserController {
     @GetMapping("/all")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
     public ResponseEntity<Page<User>> getAllUsers(
-            @RequestParam(required = false) Long eventId,
+            @RequestParam(required = false) String eventId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -48,7 +48,7 @@ public class UserController {
                 return ResponseEntity.ok(userRepository.findAll(pageable));
             }
         } else {
-            Long adminEventId = null;
+            String adminEventId = null;
             Object principal = auth.getPrincipal();
             if (principal instanceof CustomUserDetails) {
                 adminEventId = ((CustomUserDetails) principal).getUser().getEventId();
@@ -82,12 +82,7 @@ public class UserController {
                     .body("Only Super Admin can create Super Admins");
         }
 
-        if (userRepository.findByUsername(request.getUsername()).isPresent()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("User already exists");
-        }
-
-        Long eventIdToAssign = request.getEventId();
+        String eventIdToAssign = request.getEventId();
 
         if (requestedRole != Role.ROLE_SUPER_ADMIN) {
             if (isSuperAdmin) {
@@ -111,8 +106,16 @@ public class UserController {
             }
         }
 
+        String combinedId = (eventIdToAssign != null ? eventIdToAssign + "_" : "") + request.getUsername();
+
+        if (userRepository.existsById(combinedId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("User ID (derived from event and username) already exists");
+        }
+
         User user = User.builder()
-                .username(request.getUsername())
+                .id(combinedId)
+                .username(request.getUsername()) // Store only the suffix
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(requestedRole)
                 .eventId(eventIdToAssign)
@@ -121,5 +124,65 @@ public class UserController {
 
         userRepository.save(user);
         return ResponseEntity.ok("User created successfully with role " + requestedRole);
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> updateUser(@PathVariable String id, @RequestBody UserRegistrationRequest updateRequest) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        CustomUserDetails currentUserDetails = (CustomUserDetails) auth.getPrincipal();
+        User currentUser = currentUserDetails.getUser();
+
+        return userRepository.findById(id).map(targetUser -> {
+            boolean isSuperAdmin = currentUser.getRole() == Role.ROLE_SUPER_ADMIN;
+            boolean isSelf = currentUser.getId().equals(id);
+            boolean isAdminOfSameEvent = currentUser.getRole() == Role.ROLE_ADMIN &&
+                    currentUser.getEventId() != null &&
+                    currentUser.getEventId().equals(targetUser.getEventId());
+
+            // Authorization for username update
+            if (updateRequest.getUsername() != null && !updateRequest.getUsername().equals(targetUser.getUsername())) {
+                if (isSuperAdmin || isSelf || isAdminOfSameEvent) {
+                    targetUser.setUsername(updateRequest.getUsername());
+                } else {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Not authorized to change this user's name");
+                }
+            }
+
+            // Authorization for password update
+            if (updateRequest.getPassword() != null && !updateRequest.getPassword().isEmpty()) {
+                if (isSelf) {
+                    targetUser.setPassword(passwordEncoder.encode(updateRequest.getPassword()));
+                } else {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Only the user themselves can change their password");
+                }
+            }
+
+            return ResponseEntity.ok(userRepository.save(targetUser));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    public ResponseEntity<Void> deleteUser(@PathVariable String id) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isSuperAdmin = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SUPER_ADMIN"));
+
+        return userRepository.findById(id).map(user -> {
+            if (!isSuperAdmin) {
+                Object principal = auth.getPrincipal();
+                if (principal instanceof CustomUserDetails) {
+                    String adminEventId = ((CustomUserDetails) principal).getUser().getEventId();
+                    if (adminEventId == null || !adminEventId.equals(user.getEventId())) {
+                        return ResponseEntity.status(HttpStatus.FORBIDDEN).<Void>build();
+                    }
+                } else {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).<Void>build();
+                }
+            }
+            userRepository.delete(user);
+            return ResponseEntity.noContent().<Void>build();
+        }).orElse(ResponseEntity.notFound().build());
     }
 }
