@@ -1,5 +1,6 @@
 package com.example.scoremaster.app.controller;
 
+import com.example.scoremaster.app.security.CustomUserDetails;
 import com.example.scoremaster.app.security.JwtUtil;
 import jakarta.servlet.http.Cookie;
 
@@ -19,7 +20,7 @@ import java.security.Principal;
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
-    
+
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
@@ -34,9 +35,10 @@ public class AuthController {
         if (principal == null) {
             return ResponseEntity.status(401).build();
         }
-        UserDetails userDetails = userDetailsService.loadUserByUsername(principal.getName());
+        CustomUserDetails userDetails = (CustomUserDetails) userDetailsService.loadUserByUsername(principal.getName());
         String role = userDetails.getAuthorities().iterator().next().getAuthority();
-        return ResponseEntity.ok(new AuthResponse(userDetails.getUsername(), role));
+        return ResponseEntity
+                .ok(new AuthResponse(userDetails.getUsername(), userDetails.getUser().getUsername(), role));
     }
 
     @PostMapping("/logout")
@@ -47,7 +49,7 @@ public class AuthController {
         jwtCookie.setSecure(false); // Make sure this matches the login configuration
         jwtCookie.setPath("/");
         jwtCookie.setMaxAge(0); // 0 max-age tells the browser to instantly delete the cookie
-        
+
         response.addCookie(jwtCookie);
         return org.springframework.http.ResponseEntity.ok().build();
     }
@@ -56,38 +58,39 @@ public class AuthController {
     public AuthResponse login(@RequestBody AuthRequest authRequest, HttpServletResponse response) throws Exception {
         try {
             authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(authRequest.getUsername(), authRequest.getPassword())
-            );
+                    new UsernamePasswordAuthenticationToken(authRequest.getId(), authRequest.getPassword()));
         } catch (Exception e) {
-            throw new Exception("Incorrect username or password", e);
+            throw new Exception("Incorrect ID or password", e);
         }
-        
-        final UserDetails userDetails = userDetailsService.loadUserByUsername(authRequest.getUsername());
+
+        final CustomUserDetails userDetails = (CustomUserDetails) userDetailsService
+                .loadUserByUsername(authRequest.getId());
         final String jwt = jwtUtil.generateToken(userDetails);
-        
+
         // Attach JWT as HttpOnly Cookie
         Cookie jwtCookie = new Cookie("jwt", jwt);
         jwtCookie.setHttpOnly(true);
         jwtCookie.setSecure(false); // Set to true in production if using HTTPS!
         jwtCookie.setPath("/");
         jwtCookie.setMaxAge(10 * 60 * 60); // Expires in 10 hours
-        
+
         response.addCookie(jwtCookie);
-        
+
         // Grab the user role to send to React for RBAC
         String role = userDetails.getAuthorities().iterator().next().getAuthority();
-        
-        return new AuthResponse(userDetails.getUsername(), role);
+
+        return new AuthResponse(userDetails.getUsername(), userDetails.getUser().getUsername(), role);
     }
-    
+
     @Data
     public static class AuthRequest {
-        private String username;
+        private String id;
         private String password;
     }
 
     @Data
     public static class AuthResponse {
+        private final String id;
         private final String username;
         private final String role;
     }
