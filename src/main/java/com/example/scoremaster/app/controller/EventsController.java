@@ -63,7 +63,8 @@ public class EventsController {
         // Extract suffix from organizer name (which already includes the event prefix)
         String fullOrganizer = savedEvent.getOrganizer();
         String prefix = savedEvent.getId() + "_";
-        String usernameSuffix = fullOrganizer.startsWith(prefix) ? fullOrganizer.substring(prefix.length()) : fullOrganizer;
+        String usernameSuffix = fullOrganizer.startsWith(prefix) ? fullOrganizer.substring(prefix.length())
+                : fullOrganizer;
 
         User judge = User.builder()
                 .id(fullOrganizer)
@@ -96,20 +97,48 @@ public class EventsController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Event> updateEvent(@PathVariable String id,
+    public ResponseEntity<?> updateEvent(@PathVariable String id,
             @RequestBody EventRegistrationRequest updateRequest) {
         return eventRepository.findById(id).map(existingEvent -> {
             LocalDate startDate = LocalDate.parse(updateRequest.getStartDate());
             LocalDate endDate = LocalDate.parse(updateRequest.getEndDate());
 
             if (endDate.isBefore(startDate)) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).<Event>build();
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("End date cannot be before start date");
+            }
+
+            String oldOrganizer = existingEvent.getOrganizer();
+            String newOrganizer = updateRequest.getOrganizer();
+
+            // If organizer changed, handle user deletion and creation
+            if (!oldOrganizer.equals(newOrganizer)) {
+                if (userRepository.existsById(newOrganizer)) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body("New organizer username already exists");
+                }
+
+                // Delete old organizer
+                userRepository.deleteById(oldOrganizer);
+
+                // Create new organizer
+                String prefix = existingEvent.getId() + "_";
+                String usernameSuffix = newOrganizer.startsWith(prefix) ? newOrganizer.substring(prefix.length())
+                        : newOrganizer;
+
+                User judge = User.builder()
+                        .id(newOrganizer)
+                        .username(usernameSuffix)
+                        .password(passwordEncoder.encode(newOrganizer))
+                        .role(Role.ROLE_JUDGE)
+                        .eventId(existingEvent.getId())
+                        .build();
+
+                userRepository.save(judge);
             }
 
             existingEvent.setName(updateRequest.getName());
             existingEvent.setDescription(updateRequest.getDescription());
             existingEvent.setLocation(updateRequest.getLocation());
-            existingEvent.setOrganizer(updateRequest.getOrganizer());
+            existingEvent.setOrganizer(newOrganizer);
             existingEvent.setStartDate(startDate);
             existingEvent.setEndDate(endDate);
 
